@@ -6,6 +6,9 @@
 #include <time.h>
 #include "GrilleSDL.h"
 #include "Ressources.h"
+#include <string.h>
+#include <stdbool.h>
+#include <signal.h>
 
 // Dimensions de la grille de jeu
 #define NB_LIGNES   12
@@ -59,15 +62,50 @@ PIECE pieces[12] = { 0,0,0,1,1,0,1,1,4,0,       // carre 4
                      0,0,0,1,0,0,0,0,2,0,       // I 2
                      0,0,0,0,0,0,0,0,1,0 };     // carre 1
 
+
+
+char* message;
+int tailleMessage;
+int indiceCourant;
+
+pthread_mutex_t mutexMessage=PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t mutexCasesInserees=PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t condCasesInserees=PTHREAD_COND_INITIALIZER;
+
+PIECE pieceEnCours;
+CASE casesInserees[NB_CASES];
+int nbCasesInserees=0;
+
 void DessinePiece(PIECE piece);
 int  CompareCases(CASE case1,CASE case2);
 void TriCases(CASE *vecteur,int indiceDebut,int indiceFin);
+void *FctThreadDeFileMessage(void *p);
+void *FctThreadPiece(void *p);
+
+void SetMessage(const char *texte, bool signalOn);
+void handlerSIGALARM(int s);
+void RotationPiece(PIECE * pPiece);
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 int main(int argc,char* argv[])
 {
+  pthread_t threadDefileMessage, threadPiece;
+
   EVENT_GRILLE_SDL event;
  
+  sigset_t mask;
+  sigemptyset(&mask);
+  sigaddset(&mask, SIGALRM);
+  pthread_sigmask(SIG_SETMASK,&mask,NULL); 
+
+  printf("J'arme le SIGALRM...\n");
+  struct sigaction A;
+  A.sa_handler=handlerSIGALARM;
+  A.sa_flags=0;
+  sigemptyset(&A.sa_mask);
+  sigaction(SIGALRM, &A, NULL);
+
+
   srand((unsigned)time(NULL));
 
   // Ouverture de la fenetre graphique
@@ -79,13 +117,29 @@ int main(int argc,char* argv[])
     exit(1);
   }
 
+
+  printf("MAIN %p) Lancement de threadDefileMessage\n", pthread_self()); fflush(stdout);
+  if(pthread_create(&threadDefileMessage,NULL,FctThreadDeFileMessage,NULL)!=0){
+    printf("Erreur création thread\n");
+    exit(1);
+  }
+
+  SetMessage("Bienvenue dans Blockudoku ", true);
+
+  printf("MAIN %p) Lancement de threadPiece\n", pthread_self()); fflush(stdout);
+  if(pthread_create(&threadPiece,NULL,FctThreadPiece,NULL)!=0){
+    printf("Erreur création thread\n");
+    exit(1);
+  }
+
   // Exemples d'utilisation du module Ressources --> a supprimer
-  DessineChiffre(1,15,7);
+  /*lDessineChiffre(1,15,7);
   char buffer[40];
   sprintf(buffer,"coucou");
   for (int i=0 ; i<strlen(buffer) ; i++) DessineLettre(10,2+i,buffer[i]);
   DessineBrique(7,3,false);
-  DessineBrique(7,5,true);
+  DessineBrique(7,5,true);*/
+
 
   printf("(MAIN %p) Attente du clic sur la croix\n",pthread_self());  
   bool ok = false;
@@ -187,3 +241,175 @@ void TriCases(CASE *vecteur,int indiceDebut,int indiceFin)
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
+void *FctThreadDeFileMessage (void *p){
+  int i=0, pos;
+
+  sigset_t mask;
+  sigfillset(&mask);
+  sigdelset(&mask, SIGALRM);
+  pthread_sigmask(SIG_SETMASK,&mask,NULL); 
+  printf("threadDefileMessage (%p) : En attente d'un SIGALARM...\n", pthread_self());
+
+  while(1){
+    pthread_mutex_lock(&mutexMessage);
+
+    if(message!=NULL && tailleMessage >0){
+      for(i=0; i<17; i++){
+        pos=indiceCourant+i;
+
+        if(pos>=tailleMessage){
+          pos=pos-tailleMessage;
+        }
+
+        DessineLettre(10, i+1, message[pos]);
+      }
+
+      indiceCourant++;
+
+      if(indiceCourant>=tailleMessage){
+        indiceCourant=0;
+      }
+    }
+    
+
+    
+    pthread_mutex_unlock(&mutexMessage);
+
+    struct timespec temps;
+    temps.tv_sec=0;
+    temps.tv_nsec=400000000;
+    nanosleep(&temps, NULL);
+  }
+
+  pthread_exit(NULL);
+}
+
+
+void *FctThreadPiece(void *p){
+  int numPiece, nbRotations, i;
+
+  while(1){
+    numPiece=rand()%12;
+
+    pieceEnCours=pieces[numPiece];
+
+    switch(rand()%4){
+      case 0:
+        pieceEnCours.couleur=VERT;
+        break;
+      case 1:
+        pieceEnCours.couleur=ROUGE;
+        break;
+      case 2:
+        pieceEnCours.couleur=BLEU;
+        break;
+      case 3:
+        pieceEnCours.couleur=VIOLET;
+        break;
+    }
+   
+    nbRotations=rand()%4;
+
+    for(i=0; i<nbRotations; i++){
+      RotationPiece(&pieceEnCours);
+    }
+
+    DessinePiece(pieceEnCours);
+
+    printf("ThreadPiece(%p) : « Tant que nbCasesInserees<pieceEnCours.nbCases, j’attends… »\n", pthread_self());
+
+    pthread_mutex_lock(&mutexCasesInserees);
+    while(nbCasesInserees<pieceEnCours.nbCases){
+        pthread_cond_wait(&condCasesInserees, &mutexCasesInserees);
+        printf("ThreadPiece(%p) : notification reçue (nbCasesInserees=%d)\n", pthread_self(), nbCasesInserees);
+
+    }
+
+    pthread_mutex_unlock(&mutexCasesInserees);
+
+
+    struct timespec temps;
+    temps.tv_sec=5;
+    temps.tv_nsec=0;
+    nanosleep(&temps, NULL);
+  }
+  pthread_exit(NULL);
+
+}
+
+void SetMessage(const char *texte, bool signalOn){
+  alarm(0);
+
+  pthread_mutex_lock(&mutexMessage);
+  
+  free(message);
+
+  message=(char*)malloc(strlen(texte)+1);
+  if(message!=NULL){
+    strcpy(message, texte);
+    tailleMessage=strlen(message);
+    indiceCourant=0;
+  }
+
+  pthread_mutex_unlock(&mutexMessage);
+
+  if(signalOn==true){
+    alarm(10);
+  }
+}
+
+
+void RotationPiece(PIECE *pPiece){
+  PIECE newPiece;
+
+  int i;
+
+  int Lmin, Cmin;
+
+  for(i=0; i<pPiece->nbCases; i++){
+    newPiece.cases[i].ligne=-pPiece->cases[i].colonne;
+    newPiece.cases[i].colonne=pPiece->cases[i].ligne;
+
+  }
+
+  
+  newPiece.nbCases=pPiece->nbCases;
+  newPiece.couleur=pPiece->couleur;
+
+  Lmin=newPiece.cases[0].ligne;
+  Cmin=newPiece.cases[0].colonne;
+
+
+  for(i=1; i<newPiece.nbCases; i++){
+    if(newPiece.cases[i].ligne<Lmin){
+      Lmin=newPiece.cases[i].ligne;
+    }
+
+    if(newPiece.cases[i].colonne<Cmin){
+      Cmin=newPiece.cases[i].colonne;
+    }
+  }
+
+  for(i=0; i<newPiece.nbCases; i++)
+  {
+    newPiece.cases[i].ligne=newPiece.cases[i].ligne-Lmin;
+    newPiece.cases[i].colonne= newPiece.cases[i].colonne-Cmin;
+  }
+
+  TriCases(newPiece.cases, 0, newPiece.nbCases-1);
+
+  for(i=0; i<newPiece.nbCases; i++)
+  {
+    pPiece->cases[i].ligne=newPiece.cases[i].ligne;
+    pPiece->cases[i].colonne= newPiece.cases[i].colonne;
+  }
+
+  pPiece->nbCases=newPiece.nbCases;
+  pPiece->couleur=newPiece.couleur;
+}
+
+
+void handlerSIGALARM(int s){
+    printf("threadDefileMessage (%p) : J'ai reçu SIGALRM...\n", pthread_self());
+    SetMessage(" Jeu en cours", false);
+}
