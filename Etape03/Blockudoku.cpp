@@ -74,7 +74,7 @@ pthread_cond_t condCasesInserees=PTHREAD_COND_INITIALIZER;
 
 PIECE pieceEnCours;
 CASE casesInserees[NB_CASES];
-int nbCasesInserees=0;
+int nbCasesInserees;
 
 void DessinePiece(PIECE piece);
 int  CompareCases(CASE case1,CASE case2);
@@ -91,7 +91,7 @@ void RotationPiece(PIECE * pPiece);
 int main(int argc,char* argv[])
 {
   pthread_t threadDefileMessage, threadPiece, threadEvent;
-
+  
   EVENT_GRILLE_SDL event;
  
   sigset_t mask;
@@ -117,7 +117,6 @@ int main(int argc,char* argv[])
     fflush(stdout);
     exit(1);
   }
-
 
   printf("MAIN %p) Lancement de threadDefileMessage\n", pthread_self()); fflush(stdout);
   if(pthread_create(&threadDefileMessage,NULL,FctThreadDeFileMessage,NULL)!=0){
@@ -265,25 +264,21 @@ void *FctThreadDeFileMessage (void *p){
   while(1){
     pthread_mutex_lock(&mutexMessage);
 
-    if(message!=NULL && tailleMessage >0){
-      for(i=0; i<17; i++){
-        pos=indiceCourant+i;
+    for(i=0; i<17; i++){
+      pos=indiceCourant+i;
 
-        if(pos>=tailleMessage){
-          pos=pos-tailleMessage;
-        }
-
-        DessineLettre(10, i+1, message[pos]);
+      if(pos>=tailleMessage){
+        pos=pos-tailleMessage;
       }
 
-      indiceCourant++;
-
-      if(indiceCourant>=tailleMessage){
-        indiceCourant=0;
-      }
+      DessineLettre(10, i+1, message[pos]);
     }
-    
 
+    indiceCourant++;
+
+    if(indiceCourant>=tailleMessage){
+      indiceCourant=0;
+    }
     
     pthread_mutex_unlock(&mutexMessage);
 
@@ -300,6 +295,8 @@ void *FctThreadDeFileMessage (void *p){
 void *FctThreadPiece(void *p){
   int numPiece, nbRotations, i;
   int Lmin, Cmin;
+  int ok;
+  CASE tmp[NB_CASES];
 
   while(1){
     numPiece=rand()%12;
@@ -308,13 +305,13 @@ void *FctThreadPiece(void *p){
 
     switch(rand()%4){
       case 0:
-        pieceEnCours.couleur=VERT;
+        pieceEnCours.couleur=JAUNE;
         break;
       case 1:
         pieceEnCours.couleur=ROUGE;
         break;
       case 2:
-        pieceEnCours.couleur=BLEU;
+        pieceEnCours.couleur=VERT;
         break;
       case 3:
         pieceEnCours.couleur=VIOLET;
@@ -329,23 +326,67 @@ void *FctThreadPiece(void *p){
 
     DessinePiece(pieceEnCours);
 
-    printf("ThreadPiece(%p) : « Tant que le joueur n'a pas inséré assez de cases, j’attends… »\n", pthread_self());
+    printf("ThreadPiece(%p) : « Tant que le joueur n'a pas inséré suffisament de cases, j’attends… »\n", pthread_self());
 
-    pthread_mutex_lock(&mutexCasesInserees);
-    while(nbCasesInserees<pieceEnCours.nbCases){
+    ok=0;
+    while(ok==0){
+      pthread_mutex_lock(&mutexCasesInserees);
+
+      while(nbCasesInserees<pieceEnCours.nbCases){
         pthread_cond_wait(&condCasesInserees, &mutexCasesInserees);
         printf("ThreadPiece(%p) : notification reçue (nbCasesInserees=%d)\n", pthread_self(), nbCasesInserees);
+      }
 
+      for(i=0; i<nbCasesInserees; i++){
+        tmp[i]=casesInserees[i];
+      }
+
+      TriCases(tmp, 0, nbCasesInserees-1);
+
+      Lmin=tmp[0].ligne;
+      Cmin=tmp[0].colonne;
+
+      for(i=1; i<nbCasesInserees; i++){
+        if(tmp[i].ligne<Lmin){
+          Lmin=tmp[i].ligne;
+        }
+
+        if(tmp[i].colonne<Cmin){
+          Cmin=tmp[i].colonne;
+        }
+      }
+
+      for(i=0; i<nbCasesInserees; i++){
+        tmp[i].ligne-=Lmin;
+        tmp[i].colonne-=Cmin;
+      }
+      ok=1;
+
+      for(i=0; i<pieceEnCours.nbCases; i++){
+        if(tmp[i].ligne!=pieceEnCours.cases[i].ligne
+          || tmp[i].colonne != pieceEnCours.cases[i].colonne){
+          ok=0;
+          break;
+        }
+      }
+
+      if(ok==1){
+        for(i=0; i<nbCasesInserees; i++){
+          tab[casesInserees[i].ligne][casesInserees[i].colonne]=BRIQUE;
+          DessineBrique(casesInserees[i].ligne, casesInserees[i].colonne, false);
+        }
+      }
+      else{
+        for(i=0; i<nbCasesInserees; i++){
+          tab[casesInserees[i].ligne][casesInserees[i].colonne]=VIDE;
+          EffaceCarre(casesInserees[i].ligne, casesInserees[i].colonne);
+        }
+      }
+
+      nbCasesInserees=0;
+      pthread_mutex_unlock(&mutexCasesInserees);
     }
-
     
-    pthread_mutex_unlock(&mutexCasesInserees);
-
-
-    struct timespec temps;
-    temps.tv_sec=5;
-    temps.tv_nsec=0;
-    nanosleep(&temps, NULL);
   }
   pthread_exit(NULL);
 
@@ -360,21 +401,22 @@ void *FctThreadEvent(void *p){
 
     switch(event.type){
       case CLIC_GAUCHE:
-
         pthread_mutex_lock(&mutexCasesInserees);
-        if(tab[event.ligne][event.colonne]==VIDE && event.ligne>=0 && event.ligne<19
-          && event.colonne >0 && event.colonne <9){
+        if(event.ligne>=0 && event.ligne<9
+          && event.colonne>=0 && event.colonne <9
+          && tab[event.ligne][event.colonne]==VIDE
+          && nbCasesInserees<NB_CASES){
           tab[event.ligne][event.colonne]=DIAMANT;
           DessineDiamant(event.ligne, event.colonne, pieceEnCours.couleur);
 
-          if(nbCasesInserees<NB_CASES){
-            casesInserees[nbCasesInserees].ligne=event.ligne;
-            casesInserees[nbCasesInserees].colonne=event.colonne;
-            nbCasesInserees++;
+          casesInserees[nbCasesInserees].ligne=event.ligne;
+          casesInserees[nbCasesInserees].colonne=event.colonne;
+          nbCasesInserees++;
 
-            pthread_cond_signal(&condCasesInserees);
-          }
+          pthread_cond_signal(&condCasesInserees);
+
         }
+
         pthread_mutex_unlock(&mutexCasesInserees);
         break;
       case CLIC_DROIT:
@@ -396,16 +438,11 @@ void *FctThreadEvent(void *p){
         break;
     }
 
-    
-
-
   }
   pthread_exit(NULL);
 }
 
 void SetMessage(const char *texte, bool signalOn){
-  
-
   alarm(0);
 
   pthread_mutex_lock(&mutexMessage);
@@ -440,7 +477,6 @@ void RotationPiece(PIECE *pPiece){
 
   }
 
-  
   newPiece.nbCases=pPiece->nbCases;
   newPiece.couleur=pPiece->couleur;
 
@@ -460,24 +496,17 @@ void RotationPiece(PIECE *pPiece){
 
   for(i=0; i<newPiece.nbCases; i++)
   {
-    newPiece.cases[i].ligne=newPiece.cases[i].ligne-Lmin;
-    newPiece.cases[i].colonne= newPiece.cases[i].colonne-Cmin;
+    newPiece.cases[i].ligne-=Lmin;
+    newPiece.cases[i].colonne-=Cmin;
   }
 
   TriCases(newPiece.cases, 0, newPiece.nbCases-1);
 
-  for(i=0; i<newPiece.nbCases; i++)
-  {
-    pPiece->cases[i].ligne=newPiece.cases[i].ligne;
-    pPiece->cases[i].colonne= newPiece.cases[i].colonne;
-  }
-
-  pPiece->nbCases=newPiece.nbCases;
-  pPiece->couleur=newPiece.couleur;
+  *pPiece=newPiece;
 }
 
 
 void handlerSIGALARM(int s){
-    printf("threadDefileMessage (%p) : J'ai reçu SIGALRM...\n", pthread_self());
-    SetMessage(" Jeu en cours", false);
+  printf("threadDefileMessage (%p) : J'ai reçu SIGALRM...\n", pthread_self());
+  SetMessage(" Jeu en cours", false);
 }

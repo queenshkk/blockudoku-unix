@@ -240,26 +240,23 @@ void *FctThreadDeFileMessage (void *p){
   while(1){
     pthread_mutex_lock(&mutexMessage);
 
-    if(message!=NULL && tailleMessage >0){
-      for(i=0; i<17; i++){
-        pos=indiceCourant+i;
+    for(i=0; i<17; i++){
+      pos=indiceCourant +i; 
 
-        if(pos>=tailleMessage){
-          pos=pos-tailleMessage;
-        }
-
-        DessineLettre(10, i+1, message[pos]);
+      if(pos>=tailleMessage){
+        pos=pos-tailleMessage;
       }
+      
 
-      indiceCourant++;
-
-      if(indiceCourant>=tailleMessage){
-        indiceCourant=0;
-      }
+      DessineLettre(10, i+1, message[pos]);
     }
-    
 
-    
+    indiceCourant++;
+
+    if(indiceCourant>=tailleMessage){
+      indiceCourant=0;
+    }
+
     pthread_mutex_unlock(&mutexMessage);
 
     struct timespec temps;
@@ -267,8 +264,6 @@ void *FctThreadDeFileMessage (void *p){
     temps.tv_nsec=400000000;
     nanosleep(&temps, NULL);
   }
-
-  
 }
 
 
@@ -295,6 +290,6 @@ void SetMessage(const char *texte, bool signalOn){
 
 
 void handlerSIGALARM(int s){
-    printf("threadDefileMessage (%p) : J'ai reçu SIGALRM...\n", pthread_self());
-    SetMessage(" Jeu en cours", false);
+  printf("threadDefileMessage (%p) : J'ai reçu SIGALRM...\n", pthread_self());
+  SetMessage(" Jeu en cours", false);
 }

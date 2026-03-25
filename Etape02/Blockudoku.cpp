@@ -74,7 +74,7 @@ pthread_cond_t condCasesInserees=PTHREAD_COND_INITIALIZER;
 
 PIECE pieceEnCours;
 CASE casesInserees[NB_CASES];
-int nbCasesInserees=0;
+int nbCasesInserees;
 
 void DessinePiece(PIECE piece);
 int  CompareCases(CASE case1,CASE case2);
@@ -253,26 +253,22 @@ void *FctThreadDeFileMessage (void *p){
   while(1){
     pthread_mutex_lock(&mutexMessage);
 
-    if(message!=NULL && tailleMessage >0){
-      for(i=0; i<17; i++){
-        pos=indiceCourant+i;
+    for(i=0; i<17; i++){
+      pos=indiceCourant+i;
 
-        if(pos>=tailleMessage){
-          pos=pos-tailleMessage;
-        }
-
-        DessineLettre(10, i+1, message[pos]);
+      if(pos>=tailleMessage){
+        pos=pos-tailleMessage;
       }
 
-      indiceCourant++;
-
-      if(indiceCourant>=tailleMessage){
-        indiceCourant=0;
-      }
+      DessineLettre(10, i+1, message[pos]);
     }
-    
 
-    
+    indiceCourant++;
+
+    if(indiceCourant>=tailleMessage){
+      indiceCourant=0;
+    }
+
     pthread_mutex_unlock(&mutexMessage);
 
     struct timespec temps;
@@ -295,13 +291,13 @@ void *FctThreadPiece(void *p){
 
     switch(rand()%4){
       case 0:
-        pieceEnCours.couleur=VERT;
+        pieceEnCours.couleur=JAUNE;
         break;
       case 1:
         pieceEnCours.couleur=ROUGE;
         break;
       case 2:
-        pieceEnCours.couleur=BLEU;
+        pieceEnCours.couleur=VERT;
         break;
       case 3:
         pieceEnCours.couleur=VIOLET;
@@ -316,15 +312,13 @@ void *FctThreadPiece(void *p){
 
     DessinePiece(pieceEnCours);
 
-    printf("ThreadPiece(%p) : « Tant que nbCasesInserees<pieceEnCours.nbCases, j’attends… »\n", pthread_self());
+    printf("ThreadPiece(%p) : « Tant que le joueur n'a pas inséré suffisament de cases, j’attends… »\n", pthread_self());
 
     pthread_mutex_lock(&mutexCasesInserees);
     while(nbCasesInserees<pieceEnCours.nbCases){
         pthread_cond_wait(&condCasesInserees, &mutexCasesInserees);
         printf("ThreadPiece(%p) : notification reçue (nbCasesInserees=%d)\n", pthread_self(), nbCasesInserees);
-
     }
-
     pthread_mutex_unlock(&mutexCasesInserees);
 
 
@@ -363,7 +357,6 @@ void RotationPiece(PIECE *pPiece){
   PIECE newPiece;
 
   int i;
-
   int Lmin, Cmin;
 
   for(i=0; i<pPiece->nbCases; i++){
@@ -372,7 +365,6 @@ void RotationPiece(PIECE *pPiece){
 
   }
 
-  
   newPiece.nbCases=pPiece->nbCases;
   newPiece.couleur=pPiece->couleur;
 
@@ -392,24 +384,17 @@ void RotationPiece(PIECE *pPiece){
 
   for(i=0; i<newPiece.nbCases; i++)
   {
-    newPiece.cases[i].ligne=newPiece.cases[i].ligne-Lmin;
-    newPiece.cases[i].colonne= newPiece.cases[i].colonne-Cmin;
+    newPiece.cases[i].ligne-=Lmin;
+    newPiece.cases[i].colonne-=Cmin;
   }
 
   TriCases(newPiece.cases, 0, newPiece.nbCases-1);
 
-  for(i=0; i<newPiece.nbCases; i++)
-  {
-    pPiece->cases[i].ligne=newPiece.cases[i].ligne;
-    pPiece->cases[i].colonne= newPiece.cases[i].colonne;
-  }
-
-  pPiece->nbCases=newPiece.nbCases;
-  pPiece->couleur=newPiece.couleur;
+  *pPiece=newPiece;
 }
 
 
 void handlerSIGALARM(int s){
-    printf("threadDefileMessage (%p) : J'ai reçu SIGALRM...\n", pthread_self());
-    SetMessage(" Jeu en cours", false);
+  printf("threadDefileMessage (%p) : J'ai reçu SIGALRM...\n", pthread_self());
+  SetMessage(" Jeu en cours", false);
 }
