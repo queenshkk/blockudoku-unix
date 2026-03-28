@@ -86,15 +86,19 @@ int nbAnalyses=0;
 int combos=0;
 bool MAJCombos=false;
 
+bool traitementEnCours=false;
+
 pthread_mutex_t mutexMessage=PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mutexCasesInserees=PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mutexScore=PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mutexAnalyse=PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t mutexTraitement=PTHREAD_MUTEX_INITIALIZER;
 
 
 pthread_cond_t condCasesInserees=PTHREAD_COND_INITIALIZER;
 pthread_cond_t condScore=PTHREAD_COND_INITIALIZER;
 pthread_cond_t condAnalyse=PTHREAD_COND_INITIALIZER;
+pthread_cond_t condTraitement=PTHREAD_COND_INITIALIZER;
 
 
 pthread_t tabThreadCase[9][9];
@@ -155,6 +159,8 @@ int main(int argc,char* argv[])
     fflush(stdout);
     exit(1);
   }
+
+  DessineVoyant(8, 10, VERT);
 
   printf("MAIN %p) Lancement de threadDefileMessage\n", pthread_self()); fflush(stdout);
   if(pthread_create(&threadDefileMessage,NULL,FctThreadDeFileMessage,NULL)!=0){
@@ -433,6 +439,11 @@ void *FctThreadPiece(void *p){
       }
 
       if(ok==1){
+        pthread_mutex_lock(&mutexTraitement);
+        traitementEnCours=true;
+        pthread_mutex_unlock(&mutexTraitement);
+        DessineVoyant(8, 10, BLEU);
+
         for(i=0; i<nbCasesInserees; i++){
           tab[casesInserees[i].ligne][casesInserees[i].colonne]=BRIQUE;
           DessineBrique(casesInserees[i].ligne, casesInserees[i].colonne, false);
@@ -451,23 +462,32 @@ void *FctThreadPiece(void *p){
         nbAnalyses=0;
         pthread_mutex_unlock(&mutexAnalyse);
 
+       
         for(i=0; i<pieceEnCours.nbCases; i++){
           pthread_kill(tabThreadCase[casesInserees[i].ligne][casesInserees[i].colonne], SIGUSR1);
         }
+
+        pthread_mutex_lock(&mutexTraitement);
+        printf("Tant que (traitementEnCours, j'attends...\n");
+        while(traitementEnCours){
+          pthread_cond_wait(&condTraitement, &mutexTraitement);
+        }
+        pthread_mutex_unlock(&mutexTraitement);
+
       }
       else{
         for(i=0; i<nbCasesInserees; i++){
           tab[casesInserees[i].ligne][casesInserees[i].colonne]=VIDE;
           EffaceCarre(casesInserees[i].ligne, casesInserees[i].colonne);
         }
-      }
 
-      nbCasesInserees=0;
-      pthread_mutex_unlock(&mutexCasesInserees);
+       
+      }
+        nbCasesInserees=0;
+        pthread_mutex_unlock(&mutexCasesInserees);
     }
 
-    
-
+  
   }
   pthread_exit(NULL);
 
@@ -476,29 +496,71 @@ void *FctThreadPiece(void *p){
 void *FctThreadEvent(void *p){
   EVENT_GRILLE_SDL event;
   int i, ligne, colonne;
+  int oldCouleur;
 
   while(1){
     event=ReadEvent();
 
     switch(event.type){
       case CLIC_GAUCHE:
+        pthread_mutex_lock(&mutexTraitement);
+        if(traitementEnCours){
+          DessineVoyant(8, 10, ROUGE);
+          pthread_mutex_unlock(&mutexTraitement);
+
+          struct timespec temps;
+          temps.tv_sec=0;
+          temps.tv_nsec=400000000;
+          nanosleep(&temps, NULL);
+
+          pthread_mutex_lock(&mutexTraitement);
+          if(!traitementEnCours){
+            DessineVoyant(8,10,VERT);
+          }
+          else{
+            DessineVoyant(8,10,BLEU);
+          }
+          pthread_mutex_unlock(&mutexTraitement);
+          break;
+        }
+        pthread_mutex_unlock(&mutexTraitement);
+
         pthread_mutex_lock(&mutexCasesInserees);
-        if(event.ligne>=0 && event.ligne<9
-          && event.colonne>=0 && event.colonne <9
+       
+
+        if(event.ligne>=0 && event.ligne<9 && event.colonne>=0 && event.colonne <9
           && tab[event.ligne][event.colonne]==VIDE
           && nbCasesInserees<NB_CASES){
+
           tab[event.ligne][event.colonne]=DIAMANT;
           DessineDiamant(event.ligne, event.colonne, pieceEnCours.couleur);
 
           casesInserees[nbCasesInserees].ligne=event.ligne;
           casesInserees[nbCasesInserees].colonne=event.colonne;
           nbCasesInserees++;
-
+          
           pthread_cond_signal(&condCasesInserees);
+          pthread_mutex_unlock(&mutexCasesInserees);
 
         }
+        else{
+            pthread_mutex_unlock(&mutexCasesInserees);
+            DessineVoyant(8, 10, ROUGE);
+            struct timespec temps;
+            temps.tv_sec=0;
+            temps.tv_nsec=400000000;
+            nanosleep(&temps, NULL);
 
-        pthread_mutex_unlock(&mutexCasesInserees);
+            pthread_mutex_lock(&mutexTraitement);
+            if(!traitementEnCours){
+              DessineVoyant(8,10,VERT);
+            }
+            else{
+              DessineVoyant(8,10,BLEU);
+            }
+            pthread_mutex_unlock(&mutexTraitement); 
+          }
+      
         break;
       case CLIC_DROIT:
         pthread_mutex_lock(&mutexCasesInserees);
@@ -597,8 +659,8 @@ void *FctThreadNettoyeur(void *p){
     printf("ThreadNettoyeur (%p) : nbAnalyses<pieceEnCours.nbCases, j'attends...\n", pthread_self());
     
     pthread_mutex_lock(&mutexAnalyse);
-    nbCasesAttendu=pieceEnCours.nbCases;
-    while(nbAnalyses<nbCasesAttendu){
+    //nbCasesAttendu=pieceEnCours.nbCases;
+    while(nbAnalyses<pieceEnCours.nbCases){
       pthread_cond_wait(&condAnalyse, &mutexAnalyse);
       printf("ThreadNettoyeur (%p) : notification reçue (nbAnalyses=%d)\n", pthread_self(), nbAnalyses);
     }
@@ -606,6 +668,13 @@ void *FctThreadNettoyeur(void *p){
     if(nbLignesCompletes==0 && nbColonnesCompletes==0 && nbCarresComplets==0){
       nbAnalyses=0;
       pthread_mutex_unlock(&mutexAnalyse);
+
+      pthread_mutex_lock(&mutexTraitement);
+      traitementEnCours=false;
+      pthread_cond_signal(&condTraitement);
+      pthread_mutex_unlock(&mutexTraitement);
+      DessineVoyant(8,10,VERT);
+
     }
     else{
       pthread_mutex_unlock(&mutexAnalyse);
@@ -672,26 +741,30 @@ void *FctThreadNettoyeur(void *p){
       if(nbCombo==1){
         score+=10;
         SetMessage(" Simple Combo", true);
-        MAJScore=true;
       }
       else if(nbCombo==2){
         score+=25;
         SetMessage(" Double Combo", true);
-        MAJScore=true;
       }
       else if(nbCombo==3){
         score+=40;
         SetMessage(" Triple Combo", true);
-        MAJScore=true;
       }
       else if(nbCombo>=4){
         score+=55;
         SetMessage(" Quadruple Combo", true);
-        MAJScore=true;
       }
+      MAJScore=true;
 
       pthread_cond_signal(&condScore);
       pthread_mutex_unlock(&mutexScore);
+
+      pthread_mutex_lock(&mutexTraitement);
+      traitementEnCours=false;
+      pthread_cond_signal(&condTraitement);
+      pthread_mutex_unlock(&mutexTraitement);
+      DessineVoyant(8,10,VERT);
+
     }
   }
 
