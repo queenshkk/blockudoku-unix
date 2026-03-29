@@ -213,8 +213,8 @@ int main(int argc,char* argv[])
   DessineBrique(7,3,false);
   DessineBrique(7,5,true);*/
 
-/*
-  printf("(MAIN %p) Attente du clic sur la croix\n",pthread_self());  
+
+  /*printf("(MAIN %p) Attente du clic sur la croix\n",pthread_self());  
   bool ok = false;
 
   while(!ok)
@@ -232,11 +232,11 @@ int main(int argc,char* argv[])
   // Fermeture de la fenetre
   /*printf("(MAIN %p) Fermeture de la fenetre graphique...",pthread_self()); fflush(stdout);
   FermetureFenetreGraphique();
-  printf("OK\n");*/
+  printf("OK\n");
 
-  //exit(0);
-
+  exit(0);*/
   pthread_exit(NULL);
+
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -329,6 +329,7 @@ void *FctThreadDeFileMessage (void *p){
 
   while(1){
     pthread_mutex_lock(&mutexMessage);
+    if(message!=NULL && tailleMessage>0){
       for(i=0; i<17; i++){
         indice=(indiceCourant+i)%tailleMessage;
         DessineLettre(10, i+1, message[indice]);
@@ -340,6 +341,7 @@ void *FctThreadDeFileMessage (void *p){
         indiceCourant=0;
       }
     
+    }
     
     pthread_mutex_unlock(&mutexMessage);
 
@@ -486,7 +488,7 @@ void *FctThreadEvent(void *p){
         if(event.ligne>=0 && event.ligne<9
           && event.colonne>=0 && event.colonne <9
           && tab[event.ligne][event.colonne]==VIDE
-          && nbCasesInserees<NB_CASES){
+          && nbCasesInserees<pieceEnCours.nbCases){
           tab[event.ligne][event.colonne]=DIAMANT;
           DessineDiamant(event.ligne, event.colonne, pieceEnCours.couleur);
 
@@ -548,18 +550,22 @@ void *FctThreadScore(void *p){
     comb3=(combos/10)%10;
     comb4=combos%10;
 
-    DessineChiffre(1,14, score1);
-    DessineChiffre(1,15, score2);
-    DessineChiffre(1,16, score3);
-    DessineChiffre(1,17, score4);
 
-    DessineChiffre(8,14, comb1);
-    DessineChiffre(8,15, comb2);
-    DessineChiffre(8,16, comb3);
-    DessineChiffre(8,17, comb4);
-
-    MAJScore=false;
-    MAJCombos=false;
+    if(MAJScore){
+      DessineChiffre(1,14, score1);
+      DessineChiffre(1,15, score2);
+      DessineChiffre(1,16, score3);
+      DessineChiffre(1,17, score4);
+      MAJScore=false;
+    }
+    
+    if(MAJCombos){
+      DessineChiffre(8,14, comb1);
+      DessineChiffre(8,15, comb2);
+      DessineChiffre(8,16, comb3);
+      DessineChiffre(8,17, comb4);
+      MAJCombos=false;
+    }
 
     pthread_mutex_unlock(&mutexScore);
 
@@ -597,8 +603,7 @@ void *FctThreadNettoyeur(void *p){
     printf("ThreadNettoyeur (%p) : nbAnalyses<pieceEnCours.nbCases, j'attends...\n", pthread_self());
     
     pthread_mutex_lock(&mutexAnalyse);
-    nbCasesAttendu=pieceEnCours.nbCases;
-    while(nbAnalyses<nbCasesAttendu){
+    while(nbAnalyses<pieceEnCours.nbCases){
       pthread_cond_wait(&condAnalyse, &mutexAnalyse);
       printf("ThreadNettoyeur (%p) : notification reçue (nbAnalyses=%d)\n", pthread_self(), nbAnalyses);
     }
@@ -625,9 +630,6 @@ void *FctThreadNettoyeur(void *p){
           EffaceCarre(L, C);
         }
         nbCombo++;
-        pthread_mutex_lock(&mutexScore);
-        combos++;
-        pthread_mutex_unlock(&mutexScore);
       }
 
       for(i=0; i<nbColonnesCompletes; i++){
@@ -637,9 +639,6 @@ void *FctThreadNettoyeur(void *p){
           EffaceCarre(L, C);
         }
         nbCombo++;
-        pthread_mutex_lock(&mutexScore);
-        combos++;
-        pthread_mutex_unlock(&mutexScore);
       }
 
       for(i=0; i<nbCarresComplets; i++){
@@ -654,9 +653,6 @@ void *FctThreadNettoyeur(void *p){
           }
         }
         nbCombo++;
-        pthread_mutex_lock(&mutexScore);
-        combos++;
-        pthread_mutex_unlock(&mutexScore);
       }
 
       nbAnalyses=0;
@@ -667,6 +663,7 @@ void *FctThreadNettoyeur(void *p){
 
       pthread_mutex_lock(&mutexScore);
 
+      combos+=nbCombo;
       MAJCombos=true;
 
       if(nbCombo==1){

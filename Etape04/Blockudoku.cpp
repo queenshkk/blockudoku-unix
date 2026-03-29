@@ -151,7 +151,7 @@ int main(int argc,char* argv[])
   }
 
   // Exemples d'utilisation du module Ressources --> a supprimer
-  /*lDessineChiffre(1,15,7);
+  /*DessineChiffre(1,15,7);
   char buffer[40];
   sprintf(buffer,"coucou");
   for (int i=0 ; i<strlen(buffer) ; i++) DessineLettre(10,2+i,buffer[i]);
@@ -175,11 +175,12 @@ int main(int argc,char* argv[])
  
 
   // Fermeture de la fenetre
-  printf("(MAIN %p) Fermeture de la fenetre graphique...",pthread_self()); fflush(stdout);
+  /*printf("(MAIN %p) Fermeture de la fenetre graphique...",pthread_self()); fflush(stdout);
   FermetureFenetreGraphique();
-  printf("OK\n");
+  printf("OK\n");*/
 
-  exit(0);
+  //exit(0);
+  pthread_exit(NULL);
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////

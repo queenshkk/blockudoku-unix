@@ -116,6 +116,7 @@ void *FctThreadScore(void *p);
 void *FctThreadCases(void *p);
 void LiberationVarSpecifique(void *p);
 void *FctThreadNettoyeur(void *p);
+void FctThreadFin(void *p);
 
 void SetMessage(const char *texte, bool signalOn);
 void HandlerSIGALARM(int s);
@@ -217,18 +218,36 @@ int main(int argc,char* argv[])
     printf("Erreur création threadNettoyeur\n");
     exit(1);
   }
+  
+  printf("MAIN %p) Attente fin ThreadPiece\n", pthread_self()); fflush(stdout);
+  if(pthread_join(threadPiece, NULL)!=0){
+      printf("Erreur pthread_join\n");
+      exit(1);
+  }
+  SetMessage(" GAME OVER", false);
+  printf("MAIN %p) Fin ThreadPiece\n", pthread_self()); fflush(stdout);
 
- 
-  // Exemples d'utilisation du module Ressources --> a supprimer
-  /*DessineChiffre(1,15,7);
-  char buffer[40];
-  sprintf(buffer,"coucou");
-  for (int i=0 ; i<strlen(buffer) ; i++) DessineLettre(10,2+i,buffer[i]);
-  DessineBrique(7,3,false);
-  DessineBrique(7,5,true);*/
+  printf("MAIN %p) Annulation ThreadEvent\n", pthread_self()); fflush(stdout);
+  pthread_cancel(threadEvent);
 
+  printf("MAIN %p) Annulation ThreadCases\n", pthread_self()); fflush(stdout);
 
-  /*printf("(MAIN %p) Attente du clic sur la croix\n",pthread_self());  
+  for(int L=0; L<9; L++){
+    for(int C=0; C<9; C++){
+      pthread_cancel(tabThreadCase[L][C]);
+    }
+  }
+
+  for(int L=0; L<9; L++){
+    for(int C=0; C<9; C++){
+      if(pthread_join(tabThreadCase[L][C], NULL)!=0){
+        printf("Erreur pthread_join\n");
+        exit(1);
+      }
+    }
+  }
+
+  printf("(MAIN %p) Attente du clic sur la croix\n",pthread_self());  
   bool ok = false;
 
   while(!ok)
@@ -239,17 +258,20 @@ int main(int argc,char* argv[])
     {
       DessineDiamant(event.ligne,event.colonne,ROUGE);
       tab[event.ligne][event.colonne] = DIAMANT;
-    }
-  }*/
+    }*/
 
-
+  }
+  
   // Fermeture de la fenetre
-  /*printf("(MAIN %p) Fermeture de la fenetre graphique...",pthread_self()); fflush(stdout);
+  printf("(MAIN %p) Fermeture de la fenetre graphique...",pthread_self()); fflush(stdout);
   FermetureFenetreGraphique();
-  printf("OK\n");*/
+  printf("OK\n");
 
-  //exit(0);
-  pthread_exit(NULL);
+  printf("MAIN %p) Annulation ThreadDeFileMessage", pthread_self()); fflush(stdout);
+  pthread_cancel(threadDefileMessage);
+
+  
+  exit(0);
 
 }
 
@@ -341,6 +363,8 @@ void *FctThreadDeFileMessage (void *p){
   pthread_sigmask(SIG_SETMASK,&mask,NULL); 
   printf("threadDefileMessage (%p) : En attente d'un SIGALARM...\n", pthread_self());
 
+  pthread_cleanup_push(FctThreadFin, NULL);
+
   while(1){
     pthread_mutex_lock(&mutexMessage);
     if(message!=NULL && tailleMessage>0){
@@ -363,7 +387,7 @@ void *FctThreadDeFileMessage (void *p){
     temps.tv_nsec=400000000;
     nanosleep(&temps, NULL);
   }
-
+  pthread_cleanup_pop(1);
   pthread_exit(NULL);
 }
 
@@ -371,7 +395,7 @@ void *FctThreadDeFileMessage (void *p){
 void *FctThreadPiece(void *p){
   int numPiece, nbRotations, i, couleur;
   int Lmin, Cmin;
-  int ok;
+  int ok, L, C, trouve, dispo;
   CASE tmp[NB_CASES];
 
   while(1){
@@ -402,6 +426,32 @@ void *FctThreadPiece(void *p){
     }
 
     DessinePiece(pieceEnCours);
+
+    trouve=0;
+    for(L=0; L<9 && trouve==0; L++){
+      for(C=0; C<9 && trouve==0; C++){
+          dispo=1;
+
+          for(i=0; i<pieceEnCours.nbCases; i++){
+            int ligne=L+pieceEnCours.cases[i].ligne;
+            int col=C+pieceEnCours.cases[i].colonne;
+
+            if(ligne<0 || ligne >=9 || col <0 || col>=9 || tab[ligne][col]!=VIDE){
+              dispo=0;
+              break;
+            }
+          }
+
+          if(dispo==1){
+            trouve=1;
+          }
+      }
+    }
+
+    if(trouve==0){
+      printf("ThreadPiece(%p) : Aucune place disponible.\n", pthread_self());
+      pthread_exit(NULL);
+    }
 
     printf("ThreadPiece(%p) : « Tant que le joueur n'a pas inséré suffisament de cases, j’attends… »\n", pthread_self());
 
@@ -507,9 +557,8 @@ void *FctThreadPiece(void *p){
 void *FctThreadEvent(void *p){
   EVENT_GRILLE_SDL event;
   int i, ligne, colonne;
-  int oldCouleur;
 
-  while(1){
+  while(1){    
     event=ReadEvent();
 
     switch(event.type){
@@ -589,8 +638,6 @@ void *FctThreadEvent(void *p){
       case CROIX:
         FermetureFenetreGraphique();
         exit(0);
-        break;
-      default:
         break;
     }
 
@@ -773,6 +820,21 @@ void *FctThreadNettoyeur(void *p){
   }
 
   pthread_exit(NULL);
+}
+
+void FctThreadFin(void *p){
+  printf("Je passe par ma fonction de terminaison.\n");
+
+  pthread_mutex_lock(&mutexMessage);
+
+  if(message!=NULL){
+    free(message);
+    message=NULL;
+  }
+
+  tailleMessage=0;
+  indiceCourant=0;
+  pthread_mutex_unlock(&mutexMessage);
 }
 
 
